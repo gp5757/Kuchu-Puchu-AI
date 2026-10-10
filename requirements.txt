@@ -42,3 +42,5 @@ python-dotenv>=1.0.0              # Load environment variables from .env
 requests>=2.32.0                  # HTTP requests (Sarvam API, etc.)
 numpy>=1.26.0
 tqdm>=4.66.0
+pillow>=10.2.0                    # Image and whiteboard canvas rendering
+edge-tts>=6.1.9                   # Free natural neural text-to-speech

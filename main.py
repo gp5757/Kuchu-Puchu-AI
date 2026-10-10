@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import sys
 import os
 import time
@@ -30,6 +30,7 @@ from core.extractor import (
 )
 from core.diagram_generator import generate_mind_map, generate_flowchart, sanitize_mindmap, sanitize_flowchart
 from core.rag_engine import build_rag_chain, load_rag_chain, create_rag_chain_from_vector_store, ask_question
+from core.video_summary import create_job, get_job, run_video_generation_job
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -407,6 +408,111 @@ async def chat(req: ChatRequest):
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
         return {"answer": f"Sorry, I encountered an issue retrieving the answer: {str(e)}"}
+
+@app.post("/api/transcribe-audio")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """Convert recorded audio snippet to text as a fallback when Web Speech API is unavailable."""
+    temp_dir = os.path.join("downloads", "temp_voice")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_file = os.path.join(temp_dir, f"voice_{uuid.uuid4().hex}.webm")
+    try:
+        with open(temp_file, "wb") as f:
+            shutil.copyfileobj(audio.file, f)
+
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            from core.transcriber import transcribe_chunk_groq
+            text = transcribe_chunk_groq(temp_file, language="english")
+        else:
+            from core.transcriber import transcribe_chunk_whisper
+            text = transcribe_chunk_whisper(temp_file, language="english")
+
+        return {"text": text.strip() if text else ""}
+    except Exception as e:
+        print(f"Error in transcribe-audio endpoint: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
+    finally:
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+
+# ========================================================
+# AI-Powered Video Summary Endpoints
+# ========================================================
+class VideoSummaryGenerateRequest(BaseModel):
+    session_id: str = ""
+    title: str = "Lecture Summary"
+    summary: str = ""
+    action_items: str = ""
+    key_decisions: str = ""
+    voice: str = "christopher"
+
+@app.post("/api/video-summary/generate")
+async def generate_video_summary_endpoint(req: VideoSummaryGenerateRequest):
+    if not req.summary or not req.summary.strip():
+        raise HTTPException(status_code=400, detail="Summary text is required to generate the whiteboard video summary.")
+
+    job_id = create_job(req.title, req.voice)
+    asyncio.create_task(
+        run_video_generation_job(
+            job_id=job_id,
+            title=req.title,
+            summary=req.summary,
+            action_items=req.action_items,
+            key_decisions=req.key_decisions,
+            voice=req.voice
+        )
+    )
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "AI whiteboard video summary task started successfully."
+    }
+
+@app.get("/api/video-summary/status/{job_id}")
+async def get_video_summary_status_endpoint(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Video summary job not found.")
+    return job
+
+@app.get("/api/video-summary/stream/{job_id}")
+async def stream_video_summary_endpoint(job_id: str):
+    job = get_job(job_id)
+    if not job or job.get("status") != "completed" or not job.get("video_path"):
+        raise HTTPException(status_code=404, detail="Video summary not found or still processing.")
+
+    vpath = job["video_path"]
+    if not os.path.exists(vpath):
+        raise HTTPException(status_code=404, detail="Video file not found on disk.")
+
+    return FileResponse(
+        path=vpath,
+        media_type="video/mp4",
+        filename=os.path.basename(vpath),
+        headers={"Accept-Ranges": "bytes"}
+    )
+
+@app.get("/api/video-summary/download/{job_id}")
+async def download_video_summary_endpoint(job_id: str):
+    job = get_job(job_id)
+    if not job or job.get("status") != "completed" or not job.get("video_path"):
+        raise HTTPException(status_code=404, detail="Video summary not ready for download.")
+
+    vpath = job["video_path"]
+    if not os.path.exists(vpath):
+        raise HTTPException(status_code=404, detail="Video file missing.")
+
+    safe_title = "".join(c for c in (job.get("title") or "Summary") if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+    download_filename = f"KuchuPuchu_Summary_{safe_title[:30]}.mp4"
+    return FileResponse(
+        path=vpath,
+        media_type="video/mp4",
+        filename=download_filename,
+        content_disposition_type="attachment"
+    )
 
 if __name__ == "__main__":
     import uvicorn

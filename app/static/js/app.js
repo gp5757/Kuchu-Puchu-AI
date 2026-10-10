@@ -978,6 +978,271 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ========================================================
+    // 7b. Voice-to-Text Chat Input Integration
+    // ========================================================
+    const chatMicBtn = document.getElementById('chat-mic-btn');
+    const chatVoiceStatus = document.getElementById('chat-voice-status');
+    const chatVoiceStatusText = document.getElementById('chat-voice-status-text');
+    const btnVoiceCancel = document.getElementById('btn-voice-cancel');
+
+    if (chatMicBtn && chatInput) {
+        let isListening = false;
+        let speechRecognition = null;
+        let mediaRecorder = null;
+        let audioStream = null;
+        let audioChunks = [];
+        let baseInputText = '';
+        let statusTimer = null;
+
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        function setVoiceStatus(message, type = 'listening', autoHideMs = 0) {
+            if (!chatVoiceStatus || !chatVoiceStatusText) return;
+            if (statusTimer) clearTimeout(statusTimer);
+
+            chatVoiceStatus.className = `chat-voice-status ${type}`;
+            chatVoiceStatusText.textContent = message;
+            chatVoiceStatus.style.display = 'flex';
+
+            if (autoHideMs > 0) {
+                statusTimer = setTimeout(() => {
+                    hideVoiceStatus();
+                }, autoHideMs);
+            }
+        }
+
+        function hideVoiceStatus() {
+            if (chatVoiceStatus) {
+                chatVoiceStatus.style.display = 'none';
+                chatVoiceStatus.className = 'chat-voice-status';
+            }
+            if (statusTimer) {
+                clearTimeout(statusTimer);
+                statusTimer = null;
+            }
+        }
+
+        if (btnVoiceCancel) {
+            btnVoiceCancel.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isListening) {
+                    stopListening();
+                }
+                hideVoiceStatus();
+            });
+        }
+
+        function updateMicButtonUI(listening, titleText) {
+            isListening = listening;
+            if (listening) {
+                chatMicBtn.classList.add('listening');
+                chatMicBtn.setAttribute('aria-pressed', 'true');
+                chatMicBtn.setAttribute('title', titleText || 'Listening... Click to stop speaking');
+            } else {
+                chatMicBtn.classList.remove('listening');
+                chatMicBtn.setAttribute('aria-pressed', 'false');
+                chatMicBtn.setAttribute('title', titleText || 'Voice input (Click to speak)');
+            }
+        }
+
+        function stopListening() {
+            if (speechRecognition) {
+                try { speechRecognition.stop(); } catch(err) {}
+            }
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                try { mediaRecorder.stop(); } catch(err) {}
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+            updateMicButtonUI(false);
+        }
+
+        // 1. Primary: Native Browser Web Speech API (Chrome, Edge, Safari, Opera, etc.)
+        if (SpeechRecognitionAPI) {
+            speechRecognition = new SpeechRecognitionAPI();
+            speechRecognition.continuous = false;
+            speechRecognition.interimResults = true;
+            speechRecognition.maxAlternatives = 1;
+            speechRecognition.lang = navigator.language || 'en-US';
+
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            speechRecognition.onstart = () => {
+                updateMicButtonUI(true, 'Listening... Speak naturally (Click mic to stop)');
+                setVoiceStatus('Listening... Speak now into your microphone.', 'listening');
+            };
+
+            speechRecognition.onresult = (event) => {
+                interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcriptPart = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcriptPart;
+                    } else {
+                        interimTranscript += transcriptPart;
+                    }
+                }
+
+                // Convert speech into editable text in the chat input
+                const combined = (baseInputText + finalTranscript + interimTranscript).trim();
+                chatInput.value = combined;
+                chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+
+            speechRecognition.onerror = (event) => {
+                console.warn('Speech recognition error event:', event.error);
+                let errText = '';
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    errText = 'Microphone permission blocked. Please allow mic access in your browser.';
+                } else if (event.error === 'no-speech') {
+                    errText = 'No speech detected. Click the mic button to try again.';
+                } else if (event.error === 'network') {
+                    errText = 'Network connection issue with speech recognition service.';
+                } else if (event.error === 'audio-capture') {
+                    errText = 'No microphone device found on this computer.';
+                } else if (event.error === 'aborted') {
+                    return;
+                } else {
+                    errText = `Voice input error: ${event.error}`;
+                }
+                setVoiceStatus(errText, 'error', 4500);
+                updateMicButtonUI(false);
+            };
+
+            speechRecognition.onend = () => {
+                const hadText = chatInput.value.trim().length > baseInputText.trim().length;
+                updateMicButtonUI(false);
+
+                if (hadText) {
+                    setVoiceStatus('Transcribed! Review or edit your question before sending.', 'success', 3500);
+                    chatInput.focus();
+                    const len = chatInput.value.length;
+                    chatInput.setSelectionRange(len, len);
+                }
+            };
+
+            chatMicBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (isListening) {
+                    speechRecognition.stop();
+                    return;
+                }
+
+                // Preserve existing text in input if any so users can add to questions
+                baseInputText = chatInput.value ? (chatInput.value.trim() + ' ') : '';
+                interimTranscript = '';
+                finalTranscript = '';
+
+                try {
+                    speechRecognition.start();
+                } catch (err) {
+                    console.error('Failed to start speech recognition:', err);
+                    setVoiceStatus('Unable to access microphone. Please check permissions.', 'error', 4000);
+                    updateMicButtonUI(false);
+                }
+            });
+
+        } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
+            // 2. Fallback for browsers without Web Speech API: MediaRecorder + backend Whisper
+            chatMicBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+
+                if (isListening) {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        setVoiceStatus('Converting audio into editable text...', 'info');
+                        mediaRecorder.stop();
+                    }
+                    return;
+                }
+
+                baseInputText = chatInput.value ? (chatInput.value.trim() + ' ') : '';
+                audioChunks = [];
+
+                try {
+                    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (err) {
+                    console.warn('Microphone permission error:', err);
+                    setVoiceStatus('Microphone access denied. Please enable mic permissions.', 'error', 4500);
+                    return;
+                }
+
+                try {
+                    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+                    mediaRecorder = mimeType ? new MediaRecorder(audioStream, { mimeType }) : new MediaRecorder(audioStream);
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        updateMicButtonUI(false);
+                        if (audioStream) {
+                            audioStream.getTracks().forEach(track => track.stop());
+                            audioStream = null;
+                        }
+
+                        if (audioChunks.length === 0) {
+                            setVoiceStatus('No audio recorded. Please try again.', 'error', 3000);
+                            return;
+                        }
+
+                        setVoiceStatus('Transcribing speech...', 'info');
+                        const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob, 'recording.webm');
+
+                        try {
+                            const res = await fetch('/api/transcribe-audio', {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            if (!res.ok) throw new Error('Transcription failed');
+                            const data = await res.json();
+
+                            if (data.text && data.text.trim()) {
+                                chatInput.value = (baseInputText + data.text).trim();
+                                chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                chatInput.focus();
+                                const len = chatInput.value.length;
+                                chatInput.setSelectionRange(len, len);
+                                setVoiceStatus('Transcribed! Review or edit before sending.', 'success', 3500);
+                            } else {
+                                setVoiceStatus('No speech recognized. Try speaking closer to the mic.', 'error', 3500);
+                            }
+                        } catch (sttErr) {
+                            console.error('Audio transcribe error:', sttErr);
+                            setVoiceStatus('Failed to transcribe audio. Please type directly.', 'error', 4000);
+                        }
+                    };
+
+                    mediaRecorder.start();
+                    updateMicButtonUI(true, 'Recording audio... Click mic again when done speaking');
+                    setVoiceStatus('Recording voice... Click mic when done speaking.', 'listening');
+
+                } catch (recErr) {
+                    console.error('MediaRecorder initialization error:', recErr);
+                    setVoiceStatus('Could not start audio recorder.', 'error', 4000);
+                    updateMicButtonUI(false);
+                }
+            });
+
+        } else {
+            // 3. Fallback for completely unsupported environments
+            chatMicBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                setVoiceStatus('Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.', 'error', 5000);
+            });
+        }
+    }
+
     function addThinkingBubble(id) {
         const div = document.createElement('div');
         div.className = 'chat-speech-bubble bot-speech-bubble thinking-bubble';
@@ -1034,5 +1299,166 @@ document.addEventListener('DOMContentLoaded', () => {
 
         chatHistory.appendChild(div);
         chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    // ========================================================
+    // AI WHITEBOARD VIDEO SUMMARY STUDIO CONTROLLER
+    // ========================================================
+    let currentVideoJobId = null;
+    let selectedVoice = "christopher";
+    let videoPollTimer = null;
+
+    // Quick Video Summary header button scroll
+    const quickVideoBtn = document.getElementById('btn-quick-video-summary');
+    const videoStudioSection = document.getElementById('video-summary-studio');
+    if (quickVideoBtn && videoStudioSection) {
+        quickVideoBtn.addEventListener('click', () => {
+            videoStudioSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
+
+    // Voice Pill Selection
+    const voicePills = document.querySelectorAll('.voice-pill');
+    voicePills.forEach(pill => {
+        pill.addEventListener('click', () => {
+            voicePills.forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+            selectedVoice = pill.dataset.voice || "christopher";
+        });
+    });
+
+    // Generate / Re-render Video Summary
+    const generateVideoBtn = document.getElementById('btn-generate-video-summary');
+    const reGenerateVideoBtn = document.getElementById('btn-re-generate-video');
+    const videoProgressCard = document.getElementById('video-progress-card');
+    const videoProgressFill = document.getElementById('video-progress-fill');
+    const videoProgressPct = document.getElementById('video-progress-pct');
+    const videoProgressMsg = document.getElementById('video-progress-message');
+    const videoProgressTitle = document.getElementById('video-progress-status-title');
+    const videoPlayerContainer = document.getElementById('video-player-container');
+    const whiteboardVideoPlayer = document.getElementById('whiteboard-video-player');
+    const downloadVideoBtn = document.getElementById('btn-download-video-mp4');
+    const videoInfoText = document.getElementById('video-info-text');
+
+    async function triggerVideoSummaryGeneration() {
+        if (!cachedData || !cachedData.summary) {
+            alert('Please process a video or meeting first to generate a summary!');
+            return;
+        }
+
+        if (generateVideoBtn) generateVideoBtn.disabled = true;
+        if (reGenerateVideoBtn) reGenerateVideoBtn.disabled = true;
+
+        if (videoPlayerContainer) videoPlayerContainer.classList.add('hidden');
+        if (videoProgressCard) {
+            videoProgressCard.classList.remove('hidden');
+            if (videoProgressFill) videoProgressFill.style.width = '10%';
+            if (videoProgressPct) videoProgressPct.textContent = '10%';
+            if (videoProgressTitle) videoProgressTitle.textContent = 'Starting AI Whiteboard Animation...';
+            if (videoProgressMsg) videoProgressMsg.textContent = 'Submitting job to neural video engine...';
+        }
+
+        try {
+            const resp = await fetch('/api/video-summary/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: currentSessionId || '',
+                    title: cachedData.title || 'Lecture Summary',
+                    summary: cachedData.summary || '',
+                    action_items: cachedData.action_items || '',
+                    key_decisions: cachedData.key_decisions || '',
+                    voice: selectedVoice
+                })
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                throw new Error(errData.detail || 'Failed to start video summary generation.');
+            }
+
+            const data = await resp.json();
+            currentVideoJobId = data.job_id;
+            pollVideoGeneration(currentVideoJobId);
+
+        } catch (err) {
+            console.error('Video summary generation error:', err);
+            alert('Error starting video summary: ' + err.message);
+            if (videoProgressCard) videoProgressCard.classList.add('hidden');
+            if (generateVideoBtn) generateVideoBtn.disabled = false;
+            if (reGenerateVideoBtn) reGenerateVideoBtn.disabled = false;
+        }
+    }
+
+    function pollVideoGeneration(jobId) {
+        if (videoPollTimer) clearInterval(videoPollTimer);
+
+        videoPollTimer = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/video-summary/status/${jobId}`);
+                if (!res.ok) return;
+
+                const job = await res.json();
+                const pct = Math.min(100, Math.max(8, job.progress || 0));
+
+                if (videoProgressFill) videoProgressFill.style.width = `${pct}%`;
+                if (videoProgressPct) videoProgressPct.textContent = `${pct}%`;
+                if (videoProgressMsg && job.message) videoProgressMsg.textContent = job.message;
+
+                if (job.status === 'completed') {
+                    clearInterval(videoPollTimer);
+                    videoPollTimer = null;
+
+                    if (videoProgressFill) videoProgressFill.style.width = '100%';
+                    if (videoProgressPct) videoProgressPct.textContent = '100%';
+                    if (videoProgressTitle) videoProgressTitle.textContent = 'Animation Ready! 🎬';
+
+                    setTimeout(() => {
+                        if (videoProgressCard) videoProgressCard.classList.add('hidden');
+                        if (videoPlayerContainer) videoPlayerContainer.classList.remove('hidden');
+
+                        const videoStreamUrl = `/api/video-summary/stream/${jobId}`;
+                        const downloadUrl = `/api/video-summary/download/${jobId}`;
+
+                        if (whiteboardVideoPlayer) {
+                            whiteboardVideoPlayer.src = videoStreamUrl;
+                            whiteboardVideoPlayer.load();
+                        }
+
+                        if (downloadVideoBtn) {
+                            downloadVideoBtn.href = downloadUrl;
+                        }
+
+                        if (videoInfoText && job.scenes_count) {
+                            videoInfoText.textContent = `720p HD Whiteboard Folio • ${job.scenes_count} Animated Concept Scenes`;
+                        }
+
+                        if (generateVideoBtn) generateVideoBtn.disabled = false;
+                        if (reGenerateVideoBtn) reGenerateVideoBtn.disabled = false;
+
+                        if (videoPlayerContainer) {
+                            videoPlayerContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }, 800);
+
+                } else if (job.status === 'failed') {
+                    clearInterval(videoPollTimer);
+                    videoPollTimer = null;
+                    if (videoProgressTitle) videoProgressTitle.textContent = 'Rendering Notice';
+                    if (videoProgressMsg) videoProgressMsg.textContent = job.error || 'Video rendering failed.';
+                    if (generateVideoBtn) generateVideoBtn.disabled = false;
+                    if (reGenerateVideoBtn) reGenerateVideoBtn.disabled = false;
+                }
+            } catch (pollErr) {
+                console.warn('Polling error:', pollErr);
+            }
+        }, 1500);
+    }
+
+    if (generateVideoBtn) {
+        generateVideoBtn.addEventListener('click', triggerVideoSummaryGeneration);
+    }
+    if (reGenerateVideoBtn) {
+        reGenerateVideoBtn.addEventListener('click', triggerVideoSummaryGeneration);
     }
 });

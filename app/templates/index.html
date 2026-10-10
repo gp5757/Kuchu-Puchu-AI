@@ -901,6 +901,12 @@
                             <h1 id="result-title" class="summary-main-title">Meeting &amp; Lecture Summary</h1>
                         </div>
                         <div class="summary-actions-col">
+                            <button type="button" class="btn-summary-action btn-video-action" id="btn-quick-video-summary" title="Jump to AI Whiteboard Video Studio">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                <span>AI Video Summary</span>
+                            </button>
                             <button type="button" class="btn-summary-action btn-print-action" id="btn-print-notes" title="Generate and download formatted PDF">
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="6 9 6 2 18 2 18 9"></polyline>
@@ -923,6 +929,110 @@
                         <div id="result-summary" class="markdown-body summary-card-markdown"></div>
                     </div>
                 </div>
+
+                <!-- ========================================================
+                     AI WHITEBOARD VIDEO SUMMARY STUDIO
+                     ======================================================== -->
+                <section class="video-summary-studio-card" id="video-summary-studio">
+                    <div class="video-studio-washi-tape" aria-hidden="true">★ KUCHU PUCHU AI • WHITEBOARD VIDEO STUDIO ★</div>
+                    
+                    <div class="video-studio-header">
+                        <div class="studio-title-group">
+                            <div class="studio-badge-row">
+                                <span class="studio-sparkle">✦</span>
+                                <span class="studio-badge-label">AI-POWERED VIDEO SUMMARY</span>
+                            </div>
+                            <h2 class="studio-heading">Narrated Whiteboard Explainer 🎬</h2>
+                            <p class="studio-subtext">Transform this summary into a hand-drawn whiteboard animation with progressive sketch cards and natural neural narration.</p>
+                        </div>
+                        
+                        <!-- Voice Selector Controls -->
+                        <div class="studio-controls-col">
+                            <div class="voice-picker-group">
+                                <label class="voice-picker-label" id="voice-picker-label">
+                                    <span class="voice-icon">🎙️</span>
+                                    <span>Narrator Voice:</span>
+                                </label>
+                                <div class="voice-pills-row" id="voice-select-group" role="radiogroup" aria-labelledby="voice-picker-label">
+                                    <button type="button" class="voice-pill active" data-voice="christopher" title="Natural US Male">
+                                        <span class="voice-avatar">👨‍🏫</span>
+                                        <span>Christopher</span>
+                                    </button>
+                                    <button type="button" class="voice-pill" data-voice="jenny" title="Warm US Female">
+                                        <span class="voice-avatar">👩‍🏫</span>
+                                        <span>Jenny</span>
+                                    </button>
+                                    <button type="button" class="voice-pill" data-voice="neerja" title="Expressive Indian English Female">
+                                        <span class="voice-avatar">👩‍🎓</span>
+                                        <span>Neerja (IN)</span>
+                                    </button>
+                                    <button type="button" class="voice-pill" data-voice="prabhat" title="Professional Indian English Male">
+                                        <span class="voice-avatar">👨‍💼</span>
+                                        <span>Prabhat (IN)</span>
+                                    </button>
+                                    <button type="button" class="voice-pill" data-voice="swara" title="Hindi Female">
+                                        <span class="voice-avatar">🇮🇳</span>
+                                        <span>Swara (Hindi)</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <button type="button" class="btn-generate-video-action" id="btn-generate-video-summary">
+                                <svg class="play-sparkle-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                </svg>
+                                <span>Generate Whiteboard Video</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Active Generation Progress Banner (Hidden by default) -->
+                    <div class="video-progress-card hidden" id="video-progress-card">
+                        <div class="video-progress-header">
+                            <div class="progress-spinner-row">
+                                <span class="spinner-dot"></span>
+                                <strong id="video-progress-status-title">Creating Your Whiteboard Animation...</strong>
+                            </div>
+                            <span class="video-progress-pct" id="video-progress-pct">15%</span>
+                        </div>
+                        <div class="video-ruler-track">
+                            <div class="video-ruler-fill" id="video-progress-fill" style="width: 15%;"></div>
+                        </div>
+                        <div class="video-progress-message" id="video-progress-message">
+                            Synthesizing visual concepts into storyboard...
+                        </div>
+                    </div>
+
+                    <!-- Video Player Display (Hidden initially, appears on completion) -->
+                    <div class="video-player-container hidden" id="video-player-container">
+                        <div class="video-frame-bezel">
+                            <div class="whiteboard-tape-tl" aria-hidden="true"></div>
+                            <div class="whiteboard-tape-tr" aria-hidden="true"></div>
+                            <video id="whiteboard-video-player" class="whiteboard-video-element" controls playsinline preload="metadata">
+                                <p>Your browser does not support HTML5 video playback.</p>
+                            </video>
+                        </div>
+                        <div class="video-player-footer">
+                            <div class="video-footer-meta">
+                                <span class="video-badge-tag">✓ Ready to Watch & Share</span>
+                                <span class="video-info-text" id="video-info-text">720p HD • Step-by-Step Whiteboard Animation</span>
+                            </div>
+                            <div class="video-footer-actions">
+                                <a href="#" class="btn-download-video" id="btn-download-video-mp4" download="KuchuPuchu_Video_Summary.mp4">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    <span>Download MP4</span>
+                                </a>
+                                <button type="button" class="btn-re-generate-video" id="btn-re-generate-video">
+                                    <span>Re-render / Change Voice ↺</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- 3-Column Clean Takeaways (Action Items, Decisions, Questions) -->
                 <div class="takeaways-trio-row">
@@ -1107,12 +1217,27 @@
                                     required 
                                     autocomplete="off"
                                 >
+                                <button type="button" class="btn-composer-mic" id="chat-mic-btn" aria-label="Voice input" title="Voice input (Click to speak)">
+                                    <svg class="mic-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                                    </svg>
+                                    <span class="mic-recording-pulse" aria-hidden="true"></span>
+                                </button>
                                 <button type="submit" class="btn-composer-submit" id="chat-submit-btn" aria-label="Send message" title="Send message">
                                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="12" y1="19" x2="12" y2="5"></line>
                                         <polyline points="5 12 12 5 19 12"></polyline>
                                     </svg>
                                 </button>
+                            </div>
+                            <div id="chat-voice-status" class="chat-voice-status" style="display: none;" role="status" aria-live="polite">
+                                <div class="voice-status-content">
+                                    <span class="voice-status-indicator"></span>
+                                    <span id="chat-voice-status-text" class="voice-status-text">Listening... Speak now.</span>
+                                </div>
+                                <button type="button" class="btn-voice-cancel" id="btn-voice-cancel" title="Dismiss voice status" aria-label="Dismiss voice status">✕</button>
                             </div>
                         </form>
                     </div>
@@ -1280,7 +1405,7 @@
             <img src="/static/img/logo.jpg" alt="Kuchu Puchu AI" class="footer-logo-img">
             <span class="footer-brand-name">Kuchu Puchu AI</span>
         </div>
-        <p class="handwritten">Made with ❤️ by Azhan Ali</p>
+        <p class="handwritten">Made with ❤️ by Khushboo And Azhan</p>
     </footer>
 
     <!-- Scripts -->
