@@ -40,10 +40,14 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="Kuchu Puchu AI")
 
 # Configure CORS for flexible deployment
+cors_origins_env = os.environ.get("ALLOWED_ORIGINS", "*").strip()
+allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()] if cors_origins_env != "*" else ["*"]
+allow_credentials = False if "*" in allow_origins else True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allow_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -524,5 +528,7 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=is_dev,
-        reload_dirs=["app", "core", "utils"] if is_dev else None
+        reload_dirs=["app", "core", "utils"] if is_dev else None,
+        proxy_headers=True,
+        forwarded_allow_ips="*"
     )

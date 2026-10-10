@@ -7,6 +7,7 @@ using FFmpeg with progressive whiteboard reveals.
 import os
 import shutil
 import subprocess
+from utils.audio_processor import get_ffmpeg_binary
 from core.video_summary.renderer import render_scene_frame
 
 
@@ -44,23 +45,27 @@ def assemble_scene_video(
         frame_img.save(frame_path, "PNG")
         stage_files.append(frame_path)
 
-    # Concat file for FFmpeg
+    # Concat file for FFmpeg (filenames are local to temp_dir where concat.txt resides)
     concat_txt_path = os.path.join(temp_dir, f"s{scene_id}_concat.txt")
+    f0 = os.path.basename(stage_files[0])
+    f1 = os.path.basename(stage_files[1])
+    f2 = os.path.basename(stage_files[2])
+    f3 = os.path.basename(stage_files[3])
     with open(concat_txt_path, "w", encoding="utf-8") as f:
-        # Note: in FFmpeg concat format, forward slashes avoid escaping bugs
-        f.write(f"file '{stage_files[0].replace(os.sep, '/')}'\n")
+        f.write(f"file '{f0}'\n")
         f.write(f"duration {dur_0}\n")
-        f.write(f"file '{stage_files[1].replace(os.sep, '/')}'\n")
+        f.write(f"file '{f1}'\n")
         f.write(f"duration {dur_1}\n")
-        f.write(f"file '{stage_files[2].replace(os.sep, '/')}'\n")
+        f.write(f"file '{f2}'\n")
         f.write(f"duration {dur_2}\n")
-        f.write(f"file '{stage_files[3].replace(os.sep, '/')}'\n")
+        f.write(f"file '{f3}'\n")
         f.write(f"duration {dur_3}\n")
-        f.write(f"file '{stage_files[3].replace(os.sep, '/')}'\n")
+        f.write(f"file '{f3}'\n")
 
+    ffmpeg_bin = get_ffmpeg_binary() or "ffmpeg"
     # Mux frames + audio into scene MP4
     cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "concat",
         "-safe", "0",
         "-i", concat_txt_path,
@@ -93,10 +98,12 @@ def concatenate_scenes(scene_mp4_paths: list, final_output_mp4: str, temp_dir: s
     list_file_path = os.path.join(temp_dir, "scenes_list.txt")
     with open(list_file_path, "w", encoding="utf-8") as f:
         for p in scene_mp4_paths:
-            f.write(f"file '{p.replace(os.sep, '/')}'\n")
+            abs_p = os.path.abspath(p).replace("\\", "/")
+            f.write(f"file '{abs_p}'\n")
 
+    ffmpeg_bin = get_ffmpeg_binary() or "ffmpeg"
     cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "concat",
         "-safe", "0",
         "-i", list_file_path,

@@ -53,6 +53,8 @@ Instead of scrubbing through a 2-hour recording or re-listening to lectures at 2
 - 🔀 **Mermaid Process Flowcharts**: Step-by-step procedural workflows showing timelines, decision branches, and causal relationships.
 - 🎯 **Active Recall MCQ Quizzes**: Interactive self-testing cards with clickable option reveals, correctness feedback, and explanations.
 - 💬 **Grounded RAG Conversational Co-Pilot**: An in-browser chatbot backed by local ChromaDB vector embeddings (`all-MiniLM-L6-v2`) and Groq high-speed LLM inference for zero-hallucination queries.
+- 🎙️ **Interactive Voice Input**: Native hands-free microphone voice interrogation for the RAG Study Co-Pilot with real-time speech recognition and audio fallback.
+- 🎬 **AI Whiteboard Video Summary Generator**: Automatic generation of narrated, hand-drawn chalkboard animations featuring pedagogical storyboards, neural TTS voiceovers, procedural vector doodles, and 1-click MP4 export.
 - 🚌 **The Study Bus Express UI**: A distinctive hand-drawn, paper-notebook user experience complete with real-time SSE progress streaming across a 9-stage animated bus journey.
 
 ---
@@ -110,12 +112,20 @@ Instead of scrubbing through a 2-hour recording or re-listening to lectures at 2
   - Instant visual feedback: green badge for correct, red badge for wrong.
   - Automatically highlights the true correct option with clear explanations from the transcript.
 
-### 🤖 7. Conversational RAG Co-Pilot (Meeting Assistant)
+### 🤖 7. Conversational RAG Co-Pilot & Hands-Free Voice Input
 - **Local Semantic Vector Store**: Uses HuggingFace `all-MiniLM-L6-v2` embeddings (384-dimensional, normalized) stored in a local ChromaDB collection (`vector_db/`).
 - **Grounded Retrieval**: Slices transcript into 750-character semantic chunks with 75-character overlaps.
 - **Zero-Hallucination Guard**: Configured with strict prompt boundary conditions—if the answer is not in the recording, the assistant states: *"I could not find this information in the meeting transcript."*
+- **🎙️ Real-Time Voice Interrogation**: Built-in microphone recording directly inside the chat interface. Dictate questions using the browser's native Web Speech API or leverage the `/api/transcribe-audio` endpoint for server-side Whisper/Groq fallback speech-to-text.
 
-### 📄 8. One-Click Printable Folio & Export
+### 🎬 8. AI-Powered Whiteboard Video Summary Generator
+- **Pedagogical Storyboard Engine**: Uses Google Gemini 2.5 Flash (with Groq and deterministic fallback) to translate summaries into 4–6 structured scenes featuring conceptual badges, punchy key takeaways, concise bullet points, and dynamic visual doodles.
+- **Multi-Voice Neural Voiceovers**: Integrates Microsoft Edge-TTS with 6 diverse neural voices (Christopher, Jenny, Neerja, Prabhat, Swara, Madhur) and Sarvam AI Hindi TTS fallback, accurately matching visual slide transitions to exact speech durations.
+- **Hand-Drawn Canvas Rendering**: Renders high-resolution (1280×720) chalkboard/notebook visuals using Python Pillow, custom Kalam handwriting typography, washi tape labels, notebook line grids, and procedural vector doodles (lightbulb, flowchart, gears, target, brain, network, rocket, checklist).
+- **Progressive Reveal & FFmpeg Assembly**: Generates multi-stage keyframe animations synchronized to narration pacing, compiling them into web-optimized H.264 MP4 videos using FFmpeg.
+- **In-Browser Video Suite**: Includes an interactive video player modal with adjustable playback rates, full-screen playback, and 1-click direct MP4 download.
+
+### 📄 9. One-Click Printable Folio & Export
 - Formats notes into a print-ready document.
 - Built-in PDF export via `html2pdf.js` with custom styling, headers, and footers ready for your binder or digital archives.
 
@@ -145,7 +155,7 @@ Instead of scrubbing through a 2-hour recording or re-listening to lectures at 2
 
 ## 🏗️ System Architecture
 
-The following diagram illustrates the complete end-to-end data flow from user submission to final RAG-powered retrieval:
+The following diagram illustrates the complete end-to-end data flow from user submission to final multi-modal deliverables:
 
 ```mermaid
 flowchart TD
@@ -155,10 +165,13 @@ flowchart TD
     classDef audio fill:#FDF2F8,stroke:#DB2777,stroke-width:2px,color:#831843;
     classDef ai fill:#F0FDF4,stroke:#16A34A,stroke-width:2px,color:#14532D;
     classDef storage fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#4C1D95;
+    classDef video fill:#FFFBEB,stroke:#D97706,stroke-width:2px,color:#78350F;
     classDef out fill:#FFF7ED,stroke:#EA580C,stroke-width:2px,color:#7C2D12;
 
     subgraph ClientLayer ["1. Client Interface"]
         UI["Web Dashboard (HTML5, Vanilla CSS, JS)"]:::client
+        MicInput["🎙️ Voice Recorder (Web Speech API)"]:::client
+        VideoModal["🎬 Whiteboard Video Player Modal"]:::client
         CLIApp["Terminal CLI (cli.py)"]:::client
     end
 
@@ -166,9 +179,13 @@ flowchart TD
         API["FastAPI Application Server"]:::server
         SSE["SSE Event Streamer (/api/process)"]:::server
         ChatRoute["Chat Endpoint (/api/chat)"]:::server
+        VoiceRoute["Voice Transcribe (/api/transcribe-audio)"]:::server
+        VideoAPI["Video Summary API (/api/video-summary/*)"]:::server
         UI -->|HTTP Multipart / Form Data| API
         API --> SSE
+        MicInput -->|Audio Blob (Fallback)| VoiceRoute
         UI -->|POST JSON Query| ChatRoute
+        UI -->|POST Generate Video| VideoAPI
         CLIApp -->|Direct Module Calls| PipelineOrchestrator["Async Orchestration Engine"]:::server
         API --> PipelineOrchestrator
     end
@@ -196,21 +213,34 @@ flowchart TD
         Transcript --> VectorBuild["core/vector_store.py<br/>Recursive Splitter (750 chars)"]:::storage
     end
 
-    subgraph RAGLayer ["6. Vector Storage & RAG Chain"]
+    subgraph VideoEngine ["6. AI Whiteboard Video Engine (core/video_summary/)"]
+        SumEngine --> VideoMgr["manager.py<br/>Job Queue & Status Tracker"]:::video
+        VideoAPI --> VideoMgr
+        VideoMgr --> Storyboard["storyboard.py<br/>Gemini 2.5 Flash / Groq"]:::video
+        Storyboard --> TTSEngine["tts_engine.py<br/>Edge-TTS Neural Voice / Sarvam"]:::video
+        Storyboard --> Renderer["renderer.py<br/>Pillow Canvas & Kalam Font Doodles"]:::video
+        TTSEngine --> Assembler["assembler.py<br/>FFmpeg Progressive Sync & Concat"]:::video
+        Renderer --> Assembler
+        Assembler --> RenderedMP4[("Rendered MP4 Video")]:::video
+    end
+
+    subgraph RAGLayer ["7. Vector Storage & RAG Chain"]
         VectorBuild --> EmbedModel["HuggingFace Embeddings<br/>(all-MiniLM-L6-v2)"]:::storage
         EmbedModel --> Chroma[("ChromaDB Vector Store<br/>(vector_db/)")]:::storage
         Chroma --> Retriever["LangChain Similarity Retriever (k=4)"]:::storage
+        VoiceRoute -.->|Transcribed Query| ChatRoute
         ChatRoute --> RAGChain["Conversational RAG Chain (core/rag_engine.py)"]:::storage
         Retriever --> RAGChain
         RAGChain --> GroqRAG["Groq LLM (Primary + Fallbacks)"]:::ai
     end
 
-    subgraph Deliverables ["7. Interactive Deliverables"]
+    subgraph Deliverables ["8. Interactive Deliverables"]
         SumEngine --> Folio["Archival Study Folio"]:::out
         ExtEngine --> Folio
         QuizEngine --> Folio
         DiagEngine --> Folio
-        GroqRAG --> ChatView["Grounded RAG Co-Pilot"]:::out
+        GroqRAG --> ChatView["Grounded RAG Co-Pilot (Text & Voice)"]:::out
+        RenderedMP4 --> VideoModal
         Folio --> WebRender["Mermaid.js + Marked.js + html2pdf"]:::out
     end
 ```
@@ -219,7 +249,7 @@ flowchart TD
 
 ## 🗺️ User Workflow Journey
 
-From the moment you paste a link to the moment you quiz yourself, here is the complete user journey:
+From the moment you paste a link to the moment you quiz yourself, talk to your notes, and watch your whiteboard video summary, here is the complete user journey:
 
 ```mermaid
 flowchart TD
@@ -227,6 +257,7 @@ flowchart TD
     classDef startend fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#78350F;
     classDef action fill:#E0F2FE,stroke:#0284C7,stroke-width:2px,color:#075985;
     classDef bus fill:#FCE7F3,stroke:#DB2777,stroke-width:2px,color:#831843;
+    classDef video fill:#FFFBEB,stroke:#D97706,stroke-width:2px,color:#78350F;
     classDef result fill:#DCFCE7,stroke:#16A34A,stroke-width:2px,color:#14532D;
 
     Start(["Start: Open Kuchu Puchu AI"]):::startend --> StepInput["1. Provide Input Content"]:::action
@@ -260,12 +291,32 @@ flowchart TD
         Bus9 --> OutTakeaways["Review Action Items, Owners & Deadlines"]:::result
         Bus9 --> OutDiagrams["Explore Mermaid Mind Map & Flowchart (Copy Syntax)"]:::result
         Bus9 --> OutQuiz["Take 5-Question MCQ Quiz (Reveal Answers & Explanations)"]:::result
-        Bus9 --> OutChat["Ask Custom Questions via RAG Study Buddy"]:::result
+        Bus9 --> OutChat["Ask Questions via RAG Co-Pilot (Text & Voice Input)"]:::result
+        Bus9 --> OutVideo["Generate AI Whiteboard Video Summary"]:::video
         Bus9 --> OutPDF["1-Click Print Notes to Formatted PDF"]:::result
     end
 
-    OutPDF --> Complete(["Goal Achieved: Complete Lecture Mastery in Minutes"]):::startend
-    OutChat --> Complete
+    subgraph VoiceQueryFlow ["🎙️ Voice Query Workflow"]
+        OutChat --> MicClick["Click Microphone Button in Chat"]:::action
+        MicClick --> SpeakQuestion["Speak Question (Web Speech API / Server Whisper STT)"]:::action
+        SpeakQuestion --> AutoFill["Auto-fills transcribed text into Chat Bar"]:::action
+        AutoFill --> SendVoiceQuestion["Submit query to Grounded RAG Engine"]:::result
+    end
+
+    subgraph WhiteboardVideoFlow ["🎬 AI Whiteboard Video Generation Workflow"]
+        OutVideo --> SelectVoice["Select Narration Voice (Christopher, Jenny, Neerja, etc.)"]:::action
+        SelectVoice --> ClickGenVid["Click 'Generate Whiteboard Summary'"]:::action
+        ClickGenVid --> StoryboardGen["AI Synthesizes Multi-Scene Pedagogical Storyboard"]:::video
+        StoryboardGen --> NeuralTTS["Edge-TTS Generates Timed Audio Narration"]:::video
+        NeuralTTS --> SketchRender["Pillow Renders Hand-Drawn Keyframes & Kalam Typography"]:::video
+        SketchRender --> VideoMux["FFmpeg Progressive Assembly & MP4 Export"]:::video
+        VideoMux --> WatchVideo["Watch in In-Browser Player (Speed Controls, Fullscreen)"]:::result
+        WatchVideo --> DownloadMP4["1-Click Download High-Quality MP4 Video"]:::result
+    end
+
+    SendVoiceQuestion --> Complete(["Goal Achieved: Complete Lecture Mastery & Multi-Modal Retention"]):::startend
+    DownloadMP4 --> Complete
+    OutPDF --> Complete
 ```
 
 ---

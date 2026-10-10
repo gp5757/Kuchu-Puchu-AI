@@ -32,11 +32,15 @@ RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pyt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download lightweight HuggingFace embedding model (all-MiniLM-L6-v2, ~80MB)
+# Eliminates runtime Hugging Face cold-start delays and avoids 429 rate-limiting on Railway
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
 # Copy application source code
 COPY . .
 
 # Create persistent/runtime directories
-RUN mkdir -p downloads vector_db
+RUN mkdir -p downloads vector_db downloads/video_summaries && chmod -R 777 downloads vector_db
 
 # Expose default port
 EXPOSE 8000

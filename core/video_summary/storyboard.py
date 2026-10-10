@@ -65,11 +65,17 @@ def _get_storyboard_llm():
     if groq_key:
         try:
             from langchain_groq import ChatGroq
-            return ChatGroq(
+            primary = ChatGroq(
                 model="openai/gpt-oss-120b",
                 api_key=groq_key,
                 temperature=0.2
             )
+            fallback = ChatGroq(
+                model="openai/gpt-oss-20b",
+                api_key=groq_key,
+                temperature=0.2
+            )
+            return primary.with_fallbacks([fallback])
         except Exception as e:
             print(f"[storyboard] Warning: Failed to init ChatGroq: {e}")
 

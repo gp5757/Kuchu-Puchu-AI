@@ -8,6 +8,7 @@ import os
 import asyncio
 import subprocess
 import requests
+from utils.audio_processor import get_ffmpeg_binary
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -103,8 +104,9 @@ def _synthesize_sarvam(text: str, output_path: str, api_key: str) -> float:
 
 def _generate_silent_audio(output_path: str, duration_sec: float = 5.0) -> float:
     """Generates a brief silent mp3 using ffmpeg as a zero-crash safety net."""
+    ffmpeg_bin = get_ffmpeg_binary() or "ffmpeg"
     cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "lavfi",
         "-i", f"anullsrc=r=24000:cl=mono",
         "-t", str(duration_sec),
