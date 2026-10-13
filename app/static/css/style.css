@@ -1035,6 +1035,89 @@ body::before {
     border-color: #8C8474;
 }
 
+/* YouTube / Datacenter Extraction Alert Banner */
+.alert-banner-box {
+    margin-top: 14px;
+    margin-bottom: 6px;
+    background: #FFFBEB;
+    border: 1.5px solid #FCD34D;
+    border-left: 5px solid #F59E0B;
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    position: relative;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.08);
+}
+.alert-banner-box.hidden {
+    display: none !important;
+}
+.alert-banner-icon {
+    font-size: 1.3rem;
+    line-height: 1;
+    margin-top: 2px;
+}
+.alert-banner-content {
+    flex: 1;
+}
+.alert-banner-content h4 {
+    margin: 0 0 4px 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #92400E;
+    font-family: var(--font-primary);
+}
+.alert-banner-content p {
+    margin: 0 0 10px 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #78350F;
+}
+.alert-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.alert-action-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+.alert-action-btn.primary-action {
+    background: #D97706;
+    color: #FFFFFF;
+    border-color: #B45309;
+}
+.alert-action-btn.primary-action:hover {
+    background: #B45309;
+}
+.alert-action-btn.secondary-action {
+    background: #FEF3C7;
+    color: #92400E;
+    border-color: #FCD34D;
+}
+.alert-action-btn.secondary-action:hover {
+    background: #FDE68A;
+}
+.alert-banner-close {
+    background: transparent;
+    border: none;
+    color: #B45309;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+}
+.alert-banner-close:hover {
+    background: rgba(180, 83, 9, 0.1);
+}
+
 /* Tab Content Visibility */
 .hero-process-form .tab-content {
     display: none;

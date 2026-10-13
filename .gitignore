@@ -52,3 +52,4 @@ desktop.ini
 build/
 dist/
 *.egg-info/
+scratch/

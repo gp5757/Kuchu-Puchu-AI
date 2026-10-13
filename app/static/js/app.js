@@ -17,6 +17,51 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // 1a. YouTube Alert Banner Controls
+    const alertBanner = document.getElementById('youtube-alert-banner');
+    const switchUploadBtn = document.getElementById('btn-alert-switch-upload');
+    const cookieInfoBtn = document.getElementById('btn-alert-cookie-info');
+    const alertCloseBtn = document.getElementById('btn-alert-close');
+
+    if (switchUploadBtn) {
+        switchUploadBtn.addEventListener('click', () => {
+            const fileTab = document.getElementById('tab-btn-file');
+            if (fileTab) fileTab.click();
+            if (alertBanner) alertBanner.classList.add('hidden');
+            const dropzone = document.querySelector('.file-upload-dropzone') || document.getElementById('tab-file');
+            if (dropzone) {
+                dropzone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                dropzone.style.transition = 'box-shadow 0.3s, border-color 0.3s';
+                dropzone.style.borderColor = '#D97706';
+                dropzone.style.boxShadow = '0 0 0 3px rgba(217, 119, 6, 0.2)';
+                setTimeout(() => {
+                    dropzone.style.boxShadow = '';
+                    dropzone.style.borderColor = '';
+                }, 2000);
+            }
+        });
+    }
+
+    if (cookieInfoBtn) {
+        cookieInfoBtn.addEventListener('click', () => {
+            alert(
+                "🍪 How to Configure YouTube Cookies for Railway:\n\n" +
+                "1. Install the 'Cookie-Editor' browser extension (Chrome/Firefox/Edge).\n" +
+                "2. Open YouTube.com while logged in.\n" +
+                "3. Click Cookie-Editor -> 'Export' -> 'Export as Netscape' (or 'Export as JSON').\n" +
+                "4. In your Railway Project Dashboard -> Variables:\n" +
+                "   Add 'YOUTUBE_COOKIES' and paste the exported text.\n" +
+                "5. Redeploy your Railway project. Kuchu Puchu AI will automatically authenticate with YouTube!"
+            );
+        });
+    }
+
+    if (alertCloseBtn) {
+        alertCloseBtn.addEventListener('click', () => {
+            if (alertBanner) alertBanner.classList.add('hidden');
+        });
+    }
+
     // 1b. Navbar Pills Smooth Scrolling & Active Highlight
     const navPills = document.querySelectorAll('.nav-pill-item');
     navPills.forEach(pill => {
@@ -531,13 +576,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Analysis error:', error);
                 let displayMsg = error.message || 'An unexpected error occurred during analysis.';
                 const lowerMsg = displayMsg.toLowerCase();
-                if (lowerMsg.includes('failed to fetch') || lowerMsg.includes('networkerror') || lowerMsg.includes('network error')) {
-                    displayMsg = 'Network connection was interrupted or timed out. If you were analyzing a remote YouTube video, YouTube may be restricting datacenter access—please try uploading the audio or video file directly.';
-                }
-                alert('Analysis Error: ' + displayMsg);
+                const isYouTubeRestricted = lowerMsg.includes('bot verification') || 
+                                           lowerMsg.includes('datacenter') || 
+                                           lowerMsg.includes('no public captions') ||
+                                           lowerMsg.includes('youtube has restricted');
+
                 loadingSection.classList.add('hidden');
                 heroSection.classList.remove('hidden');
-                heroSection.scrollIntoView({ behavior: 'smooth' });
+
+                const alertBanner = document.getElementById('youtube-alert-banner');
+                if (alertBanner && isYouTubeRestricted) {
+                    const descElem = document.getElementById('alert-banner-desc');
+                    if (descElem) {
+                        descElem.innerHTML = "YouTube requires bot verification for this video on cloud servers and no public captions were found.<br><strong>Fastest solution:</strong> Upload your audio/video file directly to transcribe without restrictions, or add your YouTube cookies to Railway.";
+                    }
+                    alertBanner.classList.remove('hidden');
+                    alertBanner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    if (lowerMsg.includes('failed to fetch') || lowerMsg.includes('networkerror') || lowerMsg.includes('network error')) {
+                        displayMsg = 'Network connection was interrupted or timed out. If you were analyzing a remote YouTube video, YouTube may be restricting datacenter access—please try uploading the audio or video file directly.';
+                    }
+                    alert('Analysis Error: ' + displayMsg);
+                    heroSection.scrollIntoView({ behavior: 'smooth' });
+                }
             }
         });
     }

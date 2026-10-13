@@ -425,6 +425,24 @@
                         </div>
                     </div>
 
+                    <!-- YouTube / Extraction Alert Banner (Hidden by default) -->
+                    <div id="youtube-alert-banner" class="alert-banner-box hidden">
+                        <div class="alert-banner-icon">🛡️</div>
+                        <div class="alert-banner-content">
+                            <h4 id="alert-banner-title">YouTube Extraction Blocked by Datacenter Verification</h4>
+                            <p id="alert-banner-desc">YouTube requires bot verification for this video stream and no public captions were found. You can upload the video/audio file directly to transcribe without restrictions.</p>
+                            <div class="alert-banner-actions">
+                                <button type="button" id="btn-alert-switch-upload" class="alert-action-btn primary-action">
+                                    📁 Switch to File Upload (Instant &amp; Unrestricted)
+                                </button>
+                                <button type="button" id="btn-alert-cookie-info" class="alert-action-btn secondary-action">
+                                    🍪 How to Add YouTube Cookies
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" id="btn-alert-close" class="alert-banner-close" title="Dismiss">✕</button>
+                    </div>
+
                     <!-- Input Form Component -->
                     <form id="process-form" class="hero-process-form">
                         
