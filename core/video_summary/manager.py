@@ -1,7 +1,7 @@
 """
 core/video_summary/manager.py
 Orchestrator for managing background video summary jobs with real-time status tracking,
-progress reporting, and automatic asset cleanup.
+dynamic parallel processing, progress reporting, and automatic asset cleanup.
 """
 
 import os
@@ -9,11 +9,14 @@ import time
 import uuid
 import shutil
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from core.video_summary.storyboard import generate_storyboard
 from core.video_summary.tts_engine import synthesize_speech, resolve_voice
 from core.video_summary.assembler import assemble_scene_video, concatenate_scenes
 
 _jobs = {}
+_active_tasks = set()  # Strong references prevent Python asyncio GC from killing running tasks
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VIDEOS_DIR = os.path.join(BASE_DIR, "downloads", "video_summaries")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
@@ -52,7 +55,10 @@ async def run_video_generation_job(
     key_decisions: str = "",
     voice: str = "christopher"
 ):
-    """Executes the full end-to-end video summary generation in background."""
+    """
+    Executes the full end-to-end video summary generation in background using
+    parallel TTS synthesis and parallel scene rendering for maximum performance.
+    """
     job = _jobs.get(job_id)
     if not job:
         return
@@ -75,48 +81,79 @@ async def run_video_generation_job(
             raise RuntimeError("Failed to generate storyboard scenes.")
 
         job["scenes_count"] = len(scenes)
-        job["progress"] = 30
-        job["message"] = f"Storyboard created with {len(scenes)} scenes! Recording voiceover..."
+        job["progress"] = 25
+        job["message"] = f"Storyboard created with {len(scenes)} scenes! Recording voiceovers..."
 
-        # Step 2: Synthesize TTS Audio (Progress: 30% -> 60%)
+        # Step 2: Concurrent TTS Audio Synthesis (Progress: 25% -> 55%)
         job["stage"] = "narration"
         resolved_voice = resolve_voice(voice)
-        audio_files = []
-        durations = []
+        completed_tts_count = 0
+        state_lock = asyncio.Lock()
 
-        for idx, scene in enumerate(scenes, 1):
-            narration_text = scene.get("narration", "")
+        async def synthesize_one_scene(idx: int, scene_data: dict):
+            nonlocal completed_tts_count
+            narration_text = scene_data.get("narration", "")
             audio_out = os.path.join(temp_job_dir, f"audio_scene_{idx}.mp3")
             dur = await synthesize_speech(narration_text, audio_out, voice=resolved_voice)
-            audio_files.append(audio_out)
-            durations.append(dur)
-            pct = 30 + int((idx / len(scenes)) * 25)
-            job["progress"] = pct
-            job["message"] = f"Narrating scene {idx} of {len(scenes)}..."
-
-        # Step 3: Render and Assemble Scene Videos (Progress: 60% -> 85%)
-        job["stage"] = "rendering"
-        scene_mp4_paths = []
-        for idx, (scene, audio_path, dur) in enumerate(zip(scenes, audio_files, durations), 1):
-            job["progress"] = 60 + int((idx / len(scenes)) * 25)
-            job["message"] = f"Sketching whiteboard frames for scene {idx} of {len(scenes)}..."
-            scene_mp4 = os.path.join(temp_job_dir, f"scene_{idx}.mp4")
             
-            await asyncio.to_thread(
-                assemble_scene_video,
-                scene,
+            async with state_lock:
+                completed_tts_count += 1
+                pct = 25 + int((completed_tts_count / len(scenes)) * 30)
+                job["progress"] = pct
+                job["message"] = f"Voiceover ready for {completed_tts_count} of {len(scenes)} scenes..."
+            return idx, audio_out, dur
+
+        tts_tasks = [synthesize_one_scene(i, sc) for i, sc in enumerate(scenes, 1)]
+        tts_results = await asyncio.gather(*tts_tasks)
+        tts_results.sort(key=lambda x: x[0])  # Maintain chronological order
+
+        audio_files = [r[1] for r in tts_results]
+        durations = [r[2] for r in tts_results]
+
+        # Step 3: Concurrent Scene Video Rendering (Progress: 55% -> 88%)
+        job["stage"] = "rendering"
+        job["progress"] = 58
+        job["message"] = f"Sketching whiteboard frames for all {len(scenes)} scenes in parallel..."
+        completed_render_count = 0
+
+        def render_worker(idx: int, sc_data: dict, a_path: str, dur_val: float):
+            scene_mp4 = os.path.join(temp_job_dir, f"scene_{idx}.mp4")
+            assemble_scene_video(
+                sc_data,
                 title,
                 len(scenes),
-                audio_path,
-                dur,
+                a_path,
+                dur_val,
                 scene_mp4,
                 temp_job_dir
             )
-            scene_mp4_paths.append(scene_mp4)
+            return idx, scene_mp4
 
-        # Step 4: Concatenate into Final Web-Optimized MP4 (Progress: 85% -> 98%)
+        async def render_async(idx: int, sc_data: dict, a_path: str, dur_val: float, pool: ThreadPoolExecutor):
+            nonlocal completed_render_count
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(pool, render_worker, idx, sc_data, a_path, dur_val)
+            async with state_lock:
+                completed_render_count += 1
+                pct = 58 + int((completed_render_count / len(scenes)) * 30)
+                job["progress"] = pct
+                job["message"] = f"Rendered scene {completed_render_count} of {len(scenes)}..."
+            return res
+
+        workers_count = min(4, len(scenes))
+        with ThreadPoolExecutor(max_workers=workers_count) as pool:
+            render_tasks = [
+                render_async(i, sc, a, d, pool)
+                for i, (sc, a, d) in enumerate(zip(scenes, audio_files, durations), 1)
+            ]
+            render_results = await asyncio.gather(*render_tasks)
+
+        render_results.sort(key=lambda x: x[0])
+        scene_mp4_paths = [r[1] for r in render_results]
+
+        # Step 4: Stream-Copy Concatenation into Final MP4 (Progress: 88% -> 100%)
         job["stage"] = "encoding"
-        job["progress"] = 90
+        job["progress"] = 92
         job["message"] = "Muxing final high-definition MP4..."
 
         final_mp4 = os.path.join(VIDEOS_DIR, f"video_summary_{job_id}.mp4")
@@ -137,7 +174,7 @@ async def run_video_generation_job(
         job["error"] = str(e)
         job["message"] = f"Video generation failed: {str(e)}"
     finally:
-        # Cleanup temporary files, keeping final MP4
+        # Cleanup temporary scratch files while preserving the final MP4
         try:
             if os.path.exists(temp_job_dir):
                 shutil.rmtree(temp_job_dir, ignore_errors=True)
@@ -148,17 +185,13 @@ async def run_video_generation_job(
 def _cleanup_old_jobs():
     """Removes video assets older than 2 hours to conserve disk space."""
     now = time.time()
-    cutoff = now - 7200  # 2 hours
-    expired_ids = []
-    for jid, data in _jobs.items():
-        if data.get("created_at", now) < cutoff:
-            expired_ids.append(jid)
-            vpath = data.get("video_path")
+    for jid in list(_jobs.keys()):
+        job = _jobs[jid]
+        if now - job.get("created_at", now) > 7200:
+            vpath = job.get("video_path")
             if vpath and os.path.exists(vpath):
                 try:
                     os.remove(vpath)
                 except Exception:
                     pass
-
-    for jid in expired_ids:
-        _jobs.pop(jid, None)
+            _jobs.pop(jid, None)

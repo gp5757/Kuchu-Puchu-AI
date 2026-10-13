@@ -1,7 +1,7 @@
 """
 core/video_summary/storyboard.py
 Generates a structured, pedagogical storyboard for the whiteboard video summary
-using Gemini (with Groq fallback and resilient deterministic fallback).
+using ultra-fast Groq LLMs (with Gemini fallback and resilient deterministic fallback).
 """
 
 import os
@@ -48,19 +48,10 @@ Do NOT include markdown backticks around the JSON. Only return pure JSON.
 
 
 def _get_storyboard_llm():
-    """Returns Gemini 2.5 Flash as primary LLM, Groq as secondary fallback."""
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                api_key=gemini_key,
-                temperature=0.2
-            )
-        except Exception as e:
-            print(f"[storyboard] Warning: Failed to init ChatGoogleGenerativeAI: {e}")
-
+    """
+    Returns high-speed Groq LLM as primary (3-5s generation) with Gemini Flash fallback.
+    Enforces strict 15s request_timeout so it never hangs.
+    """
     groq_key = os.getenv("GROQ_API_KEY")
     if groq_key:
         try:
@@ -68,16 +59,33 @@ def _get_storyboard_llm():
             primary = ChatGroq(
                 model="openai/gpt-oss-120b",
                 api_key=groq_key,
-                temperature=0.2
+                temperature=0.2,
+                request_timeout=15,
+                max_tokens=2500
             )
             fallback = ChatGroq(
                 model="openai/gpt-oss-20b",
                 api_key=groq_key,
-                temperature=0.2
+                temperature=0.2,
+                request_timeout=15,
+                max_tokens=2500
             )
             return primary.with_fallbacks([fallback])
         except Exception as e:
             print(f"[storyboard] Warning: Failed to init ChatGroq: {e}")
+
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                api_key=gemini_key,
+                temperature=0.2,
+                timeout=15
+            )
+        except Exception as e:
+            print(f"[storyboard] Warning: Failed to init ChatGoogleGenerativeAI: {e}")
 
     return None
 
@@ -116,26 +124,26 @@ Draft the whiteboard animation storyboard JSON now:"""
         response = llm.invoke(messages)
         content = response.content if hasattr(response, "content") else str(response)
 
-        # Clean potential markdown wrapping
-        clean_json = re.sub(r"^```(?:json)?", "", content.strip(), flags=re.MULTILINE)
-        clean_json = re.sub(r"```$", "", clean_json.strip(), flags=re.MULTILINE).strip()
-
-        data = json.loads(clean_json)
-        if isinstance(data, dict) and "scenes" in data and len(data["scenes"]) >= 2:
-            # Validate scene fields
-            for idx, scene in enumerate(data["scenes"], 1):
-                scene["scene_id"] = idx
-                scene["header"] = scene.get("header") or f"Concept {idx}"
-                scene["badge"] = scene.get("badge") or f"PART {idx}"
-                scene["narration"] = scene.get("narration") or f"In this section, we examine key concept {idx}."
-                scene["key_point"] = scene.get("key_point") or "Important highlight from discussion."
-                if not isinstance(scene.get("bullet_points"), list):
-                    scene["bullet_points"] = ["Core insight explored in depth.", "Practical application discussed."]
-                if scene.get("doodle_type") not in ["lightbulb", "flowchart", "gears", "target", "brain", "network", "rocket", "checklist"]:
-                    scene["doodle_type"] = "lightbulb"
-                if not scene.get("accent_color"):
-                    scene["accent_color"] = "#2A9D8F"
-            return data
+        # Robust JSON extraction: finds the outermost JSON object
+        json_match = re.search(r"\{[\s\S]*\}", content)
+        if json_match:
+            clean_json = json_match.group(0)
+            data = json.loads(clean_json)
+            if isinstance(data, dict) and "scenes" in data and len(data["scenes"]) >= 2:
+                # Validate scene fields
+                for idx, scene in enumerate(data["scenes"], 1):
+                    scene["scene_id"] = idx
+                    scene["header"] = scene.get("header") or f"Concept {idx}"
+                    scene["badge"] = scene.get("badge") or f"PART {idx}"
+                    scene["narration"] = scene.get("narration") or f"In this section, we examine key concept {idx}."
+                    scene["key_point"] = scene.get("key_point") or "Important highlight from discussion."
+                    if not isinstance(scene.get("bullet_points"), list):
+                        scene["bullet_points"] = ["Core insight explored in depth.", "Practical application discussed."]
+                    if scene.get("doodle_type") not in ["lightbulb", "flowchart", "gears", "target", "brain", "network", "rocket", "checklist"]:
+                        scene["doodle_type"] = "lightbulb"
+                    if not scene.get("accent_color"):
+                        scene["accent_color"] = "#2A9D8F"
+                return data
     except Exception as e:
         print(f"[storyboard] Error in LLM storyboard generation: {e}")
 

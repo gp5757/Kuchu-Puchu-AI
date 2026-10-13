@@ -29,7 +29,7 @@ from core.extractor import (
     extract_all_takeaways, generate_mcq_quiz
 )
 from core.diagram_generator import generate_mind_map, generate_flowchart, sanitize_mindmap, sanitize_flowchart
-from core.rag_engine import build_rag_chain, load_rag_chain, create_rag_chain_from_vector_store, ask_question
+from core.rag_engine import build_rag_chain, load_rag_chain, create_rag_chain_from_vector_store, ask_question, ask_question_async
 from core.video_summary import create_job, get_job, run_video_generation_job
 from dotenv import load_dotenv
 
@@ -68,10 +68,22 @@ async def health_check():
 
 # In-memory store for RAG chains
 rag_chains = {}
+_background_tasks = set()
 
 class ChatRequest(BaseModel):
     session_id: str
     question: str
+
+@app.on_event("startup")
+async def startup_warmup():
+    """Pre-warms embedding model and LLM in background on server boot."""
+    try:
+        from core.vector_store import warmup_embeddings
+        task = asyncio.create_task(asyncio.to_thread(warmup_embeddings))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception as e:
+        print(f"Startup warmup notice: {e}")
 
 @app.get("/")
 async def read_root(request: Request):
@@ -80,8 +92,8 @@ async def read_root(request: Request):
 import json
 import asyncio
 from fastapi.responses import JSONResponse, StreamingResponse
-from core.vector_store import build_vector_store, get_retriever
-from core.rag_engine import get_llm as get_rag_llm, format_docs, ask_question
+from core.vector_store import build_vector_store, get_retriever, warmup_embeddings
+from core.rag_engine import get_llm as get_rag_llm, format_docs, ask_question, ask_question_async
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
@@ -396,7 +408,7 @@ async def chat(req: ChatRequest):
 
     if not target_chain:
         try:
-            target_chain = load_rag_chain()
+            target_chain = await asyncio.to_thread(load_rag_chain)
             if req.session_id:
                 rag_chains[req.session_id] = target_chain
             rag_chains["latest"] = target_chain
@@ -407,7 +419,7 @@ async def chat(req: ChatRequest):
         return {"answer": "No active meeting session found. Please analyze a video or file first to enable the chat co-pilot."}
 
     try:
-        answer = ask_question(target_chain, req.question)
+        answer = await ask_question_async(target_chain, req.question)
         return {"answer": answer}
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
@@ -459,7 +471,7 @@ async def generate_video_summary_endpoint(req: VideoSummaryGenerateRequest):
         raise HTTPException(status_code=400, detail="Summary text is required to generate the whiteboard video summary.")
 
     job_id = create_job(req.title, req.voice)
-    asyncio.create_task(
+    task = asyncio.create_task(
         run_video_generation_job(
             job_id=job_id,
             title=req.title,
@@ -469,6 +481,9 @@ async def generate_video_summary_endpoint(req: VideoSummaryGenerateRequest):
             voice=req.voice
         )
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
     return {
         "job_id": job_id,
         "status": "queued",

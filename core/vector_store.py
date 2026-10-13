@@ -1,4 +1,5 @@
 import os 
+import functools
 import torch
 from dotenv import load_dotenv
 
@@ -24,19 +25,64 @@ COLLECTION_NAME = "meeting_transcript"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 _embeddings_instance = None
+_chroma_client_instance = None
+_cached_vector_store = None
+
+
+class CachedHuggingFaceEmbeddings(HuggingFaceEmbeddings):
+    """
+    Subclass that adds an in-memory LRU cache for query embeddings.
+    Avoids redundant PyTorch forward passes on CPU for identical or repeated questions.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cache = {}
+
+    def embed_query(self, text: str):
+        cleaned = text.strip()
+        if cleaned in self._cache:
+            return self._cache[cleaned]
+        # Keep cache bounded to prevent memory growth
+        if len(self._cache) > 256:
+            self._cache.pop(next(iter(self._cache)))
+        result = super().embed_query(text)
+        self._cache[cleaned] = result
+        return result
+
+
+def get_chroma_client():
+    """Singleton persistent Chroma client for fast index reuse."""
+    global _chroma_client_instance
+    if _chroma_client_instance is None:
+        import chromadb
+        _chroma_client_instance = chromadb.PersistentClient(path=CHROMA_DIR)
+    return _chroma_client_instance
+
 
 def get_embeddings():
+    """Initializes and returns cached singleton HuggingFace embeddings."""
     global _embeddings_instance
     if _embeddings_instance is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        _embeddings_instance = HuggingFaceEmbeddings(
+        _embeddings_instance = CachedHuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
             model_kwargs={"device": device},
             encode_kwargs={"batch_size": 32, "normalize_embeddings": True}
         )
     return _embeddings_instance
 
+
+def warmup_embeddings():
+    """Helper to warm up the embedding model on server startup in background."""
+    try:
+        emb = get_embeddings()
+        emb.embed_query("warmup")
+    except Exception as e:
+        print(f"[vector_store] Warmup notice: {e}")
+
+
 def build_vector_store(transcript: str) -> Chroma:
+    global _cached_vector_store
     print("[vector_store] Building vector store...")
 
     clean_text = (transcript or "").strip()
@@ -61,8 +107,7 @@ def build_vector_store(transcript: str) -> Chroma:
 
     embeddings = get_embeddings()
     try:
-        import chromadb
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        client = get_chroma_client()
         try:
             client.delete_collection(COLLECTION_NAME)
         except Exception:
@@ -80,20 +125,39 @@ def build_vector_store(transcript: str) -> Chroma:
             embedding=embeddings
         )
 
+    _cached_vector_store = vector_store
     print(f"[vector_store] Vector store indexed with {len(docs)} semantic chunks.")
     return vector_store
 
 
 def load_vector_store() -> Chroma:
+    global _cached_vector_store
+    if _cached_vector_store is not None:
+        return _cached_vector_store
+
     embeddings = get_embeddings()
-    vector_store = Chroma(
-        collection_name=COLLECTION_NAME,
-        embedding_function=embeddings,
-        persist_directory=CHROMA_DIR
-    )
+    try:
+        client = get_chroma_client()
+        vector_store = Chroma(
+            client=client,
+            collection_name=COLLECTION_NAME,
+            embedding_function=embeddings
+        )
+    except Exception:
+        vector_store = Chroma(
+            collection_name=COLLECTION_NAME,
+            embedding_function=embeddings,
+            persist_directory=CHROMA_DIR
+        )
+    _cached_vector_store = vector_store
     return vector_store
 
-def get_retriever(vector_store: Chroma, k: int = 4):
+
+def get_retriever(vector_store: Chroma, k: int = 3):
+    """
+    Returns an optimized retriever with k=3 to minimize token context size and LLM latency
+    while providing complete context.
+    """
     return vector_store.as_retriever(
         search_type='similarity',
         search_kwargs={"k": k}

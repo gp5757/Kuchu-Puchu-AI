@@ -1,7 +1,7 @@
 """
 core/video_summary/tts_engine.py
 Text-to-speech module using Microsoft Edge-TTS with Sarvam AI fallback,
-providing clean neural audio narration and exact duration timing.
+providing clean neural audio narration, resilient timeouts, and exact duration timing.
 """
 
 import os
@@ -36,6 +36,7 @@ def resolve_voice(voice_key: str) -> str:
 async def synthesize_speech(text: str, output_path: str, voice: str = DEFAULT_VOICE) -> float:
     """
     Synthesizes narration audio from text and saves to output_path (.mp3).
+    Guaranteed never to hang indefinitely by enforcing strict async timeouts.
     Returns exact duration of the generated audio in seconds.
     """
     clean_text = text.strip()
@@ -45,14 +46,26 @@ async def synthesize_speech(text: str, output_path: str, voice: str = DEFAULT_VO
     resolved_voice = resolve_voice(voice)
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-    # 1. Primary: Edge-TTS
+    # 1. Primary: Edge-TTS with async timeout
     try:
         import edge_tts
         communicate = edge_tts.Communicate(clean_text, resolved_voice)
-        await communicate.save(output_path)
+        # Timeout prevents infinite hang on dropped websocket connection
+        await asyncio.wait_for(communicate.save(output_path), timeout=12.0)
         duration = get_audio_duration(output_path)
         if duration > 0.5:
             return duration
+    except asyncio.TimeoutError:
+        print(f"[tts_engine] Edge-TTS timed out for '{resolved_voice}' after 12s. Retrying once...")
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(clean_text, resolved_voice)
+            await asyncio.wait_for(communicate.save(output_path), timeout=6.0)
+            duration = get_audio_duration(output_path)
+            if duration > 0.5:
+                return duration
+        except Exception as retry_err:
+            print(f"[tts_engine] Edge-TTS retry failed: {retry_err}")
     except Exception as e:
         print(f"[tts_engine] Edge-TTS warning for '{resolved_voice}': {e}. Attempting fallback...")
 
@@ -60,13 +73,14 @@ async def synthesize_speech(text: str, output_path: str, voice: str = DEFAULT_VO
     sarvam_key = os.getenv("SARVAM_API_KEY")
     if sarvam_key and ("hi-IN" in resolved_voice or "en-IN" in resolved_voice):
         try:
-            sarvam_dur = _synthesize_sarvam(clean_text, output_path, sarvam_key)
+            sarvam_dur = await asyncio.to_thread(_synthesize_sarvam, clean_text, output_path, sarvam_key)
             if sarvam_dur > 0.5:
                 return sarvam_dur
         except Exception as e:
             print(f"[tts_engine] Sarvam TTS fallback warning: {e}")
 
     # 3. Emergency fallback: Generate small silence clip so video rendering never crashes
+    print(f"[tts_engine] Using emergency silence fallback for: {clean_text[:40]}...")
     return _generate_silent_audio(output_path, duration_sec=5.0)
 
 
@@ -89,7 +103,7 @@ def _synthesize_sarvam(text: str, output_path: str, api_key: str) -> float:
         "enable_preprocessing": True,
         "model": "bulbul:v1"
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=15)
+    resp = requests.post(url, json=payload, headers=headers, timeout=12)
     if resp.status_code == 200:
         data = resp.json()
         audios = data.get("audios", [])
@@ -108,14 +122,14 @@ def _generate_silent_audio(output_path: str, duration_sec: float = 5.0) -> float
     cmd = [
         ffmpeg_bin, "-y",
         "-f", "lavfi",
-        "-i", f"anullsrc=r=24000:cl=mono",
+        "-i", "anullsrc=r=44100:cl=stereo",
         "-t", str(duration_sec),
         "-q:a", "9",
         "-acodec", "libmp3lame",
         output_path
     ]
     try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
         return duration_sec
     except Exception as e:
         print(f"[tts_engine] Failed to generate silence: {e}")
@@ -135,7 +149,7 @@ def get_audio_duration(file_path: str) -> float:
             "-of", "default=noprint_wrappers=1:nokey=1",
             file_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=True)
         dur_str = result.stdout.strip()
         if dur_str:
             return round(float(dur_str), 2)
