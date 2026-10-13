@@ -30,11 +30,11 @@ RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pyt
 
 # Install project Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Pre-download lightweight HuggingFace embedding model (all-MiniLM-L6-v2, ~80MB)
 # Eliminates runtime Hugging Face cold-start delays and avoids 429 rate-limiting on Railway
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || true
 
 # Copy application source code
 COPY . .

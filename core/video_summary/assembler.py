@@ -98,15 +98,20 @@ def concatenate_scenes(scene_mp4_paths: list, final_output_mp4: str, temp_dir: s
     if not scene_mp4_paths:
         raise ValueError("No scene clips provided to concatenate.")
 
-    if len(scene_mp4_paths) == 1:
-        shutil.copyfile(scene_mp4_paths[0], final_output_mp4)
+    # Filter only existing scenes
+    valid_paths = [p for p in scene_mp4_paths if os.path.exists(p) and os.path.getsize(p) > 1000]
+    if not valid_paths:
+        raise RuntimeError("All rendered scene video files are missing or empty.")
+
+    if len(valid_paths) == 1:
+        shutil.copyfile(valid_paths[0], final_output_mp4)
         return final_output_mp4
 
     list_file_path = os.path.join(temp_dir, "scenes_list.txt")
     with open(list_file_path, "w", encoding="utf-8") as f:
-        for p in scene_mp4_paths:
-            abs_p = os.path.abspath(p).replace("\\", "/")
-            f.write(f"file '{abs_p}'\n")
+        for p in valid_paths:
+            # Use relative filename so concat demuxer avoids absolute path escaping issues across OSes
+            f.write(f"file '{os.path.basename(p)}'\n")
 
     ffmpeg_bin = get_ffmpeg_binary() or "ffmpeg"
     # Copy video stream directly without re-encoding; clean audio remuxing ensures seamless cross-scene audio
@@ -114,34 +119,59 @@ def concatenate_scenes(scene_mp4_paths: list, final_output_mp4: str, temp_dir: s
         ffmpeg_bin, "-y",
         "-f", "concat",
         "-safe", "0",
-        "-i", list_file_path,
+        "-i", "scenes_list.txt",
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "128k",
         "-ar", "44100",
         "-ac", "2",
         "-movflags", "+faststart",
-        final_output_mp4
+        os.path.abspath(final_output_mp4)
     ]
 
     try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True)
+        subprocess.run(
+            cmd,
+            cwd=temp_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=True
+        )
     except Exception as copy_err:
-        print(f"[assembler] Notice: Stream copy concat returned: {copy_err}. Retrying with fast re-encode...")
-        # Resilient fallback if stream copy has container incompatibilities
+        err_msg = ""
+        if hasattr(copy_err, "stderr") and copy_err.stderr:
+            err_msg = copy_err.stderr.decode("utf-8", errors="ignore")
+        print(f"[assembler] Notice: Stream copy concat returned: {err_msg or copy_err}. Retrying with fast re-encode...")
+
+        # Resilient fallback with fastest CPU preset
         fallback_cmd = [
             ffmpeg_bin, "-y",
             "-f", "concat",
             "-safe", "0",
-            "-i", list_file_path,
+            "-i", "scenes_list.txt",
             "-c:v", "libx264",
-            "-preset", "veryfast",
+            "-preset", "ultrafast",
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "128k",
+            "-ar", "44100",
+            "-ac", "2",
             "-movflags", "+faststart",
-            final_output_mp4
+            os.path.abspath(final_output_mp4)
         ]
-        subprocess.run(fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
+        res = subprocess.run(
+            fallback_cmd,
+            cwd=temp_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=45
+        )
+        if res.returncode != 0:
+            err_txt = res.stderr.decode("utf-8", errors="ignore") if res.stderr else "Unknown FFmpeg error"
+            raise RuntimeError(f"FFmpeg concatenation failed: {err_txt[:300]}")
+
+    if not os.path.exists(final_output_mp4) or os.path.getsize(final_output_mp4) < 1000:
+        raise RuntimeError(f"Concatenated final video file missing or corrupted at {final_output_mp4}")
 
     return final_output_mp4

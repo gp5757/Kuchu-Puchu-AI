@@ -57,12 +57,39 @@ async def run_video_generation_job(
 ):
     """
     Executes the full end-to-end video summary generation in background using
-    parallel TTS synthesis and parallel scene rendering for maximum performance.
+    parallel TTS synthesis and parallel scene rendering with an overall 180s watchdog.
     """
     job = _jobs.get(job_id)
     if not job:
         return
 
+    try:
+        await asyncio.wait_for(
+            _execute_video_generation_job(job_id, title, summary, action_items, key_decisions, voice),
+            timeout=180.0
+        )
+    except asyncio.TimeoutError:
+        print(f"[manager] Video summary job {job_id} timed out after 180s.")
+        job["status"] = "failed"
+        job["error"] = "Video generation timed out after 3 minutes. Please try again with a shorter summary."
+        job["message"] = "Video generation timed out after 3 minutes. Please try again."
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["message"] = f"Video generation failed: {str(e)}"
+
+
+async def _execute_video_generation_job(
+    job_id: str,
+    title: str,
+    summary: str,
+    action_items: str = "",
+    key_decisions: str = "",
+    voice: str = "christopher"
+):
+    job = _jobs.get(job_id)
     temp_job_dir = os.path.join(VIDEOS_DIR, f"temp_{job_id}")
     os.makedirs(temp_job_dir, exist_ok=True)
 
@@ -161,18 +188,17 @@ async def run_video_generation_job(
             concatenate_scenes, scene_mp4_paths, final_mp4, temp_job_dir
         )
 
+        if not os.path.exists(final_mp4) or os.path.getsize(final_mp4) < 1000:
+            raise RuntimeError("Final video MP4 could not be assembled or verified.")
+
+        job["progress"] = 98
+        job["message"] = "Finalizing stream..."
         job["video_path"] = final_mp4
         job["status"] = "completed"
         job["stage"] = "ready"
         job["progress"] = 100
         job["message"] = "Whiteboard video summary generated successfully!"
 
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        job["status"] = "failed"
-        job["error"] = str(e)
-        job["message"] = f"Video generation failed: {str(e)}"
     finally:
         # Cleanup temporary scratch files while preserving the final MP4
         try:

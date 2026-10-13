@@ -1393,7 +1393,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function pollVideoGeneration(jobId) {
         if (videoPollTimer) clearInterval(videoPollTimer);
 
+        let pollCount = 0;
+        const maxPolls = 120; // 120 * 1.5s = 180 seconds (3 minutes)
+
         videoPollTimer = setInterval(async () => {
+            pollCount++;
+            if (pollCount > maxPolls) {
+                clearInterval(videoPollTimer);
+                videoPollTimer = null;
+                if (videoProgressTitle) videoProgressTitle.textContent = 'Rendering Timeout';
+                if (videoProgressMsg) videoProgressMsg.textContent = 'Video generation timed out after 3 minutes. Please try again with a shorter summary.';
+                if (generateVideoBtn) generateVideoBtn.disabled = false;
+                if (reGenerateVideoBtn) reGenerateVideoBtn.disabled = false;
+                return;
+            }
+
             try {
                 const res = await fetch(`/api/video-summary/status/${jobId}`);
                 if (!res.ok) return;
